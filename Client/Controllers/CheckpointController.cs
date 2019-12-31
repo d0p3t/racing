@@ -5,7 +5,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Drawing;
 using System.Threading.Tasks;
+using Client.Enums;
 using Client.Models;
+using Client.Models.Mapping;
 
 namespace Client.Controllers
 {
@@ -13,6 +15,20 @@ namespace Client.Controllers
     {
         private static Dictionary<MapCheckpoint, int> m_checkpoints = new Dictionary<MapCheckpoint, int>();
         private static Dictionary<MapCheckpoint, int> m_secondaryCheckpoints = new Dictionary<MapCheckpoint, int>();
+
+        private Dictionary<Blip, int> m_blips = new Dictionary<Blip, int>();
+
+        private List<MapCheckpoint> m_checkpointstwo = new List<MapCheckpoint>();
+        private List<MapCheckpoint> m_secondaryCheckpointstwo = new List<MapCheckpoint>();
+
+        private int m_currentCheckpointId = -1;
+
+        private int m_checkpointHandle = -1;
+        private int m_secondaryCheckpointHandle = -1;
+
+        private Blip m_currentCheckpointBlip = null;
+        private Blip m_secondaryCheckpointBlip = null;
+        private Blip m_nextCheckpointBlip = null;
 
         private int m_nextCheckpoint = 0;
 
@@ -40,222 +56,201 @@ namespace Client.Controllers
 
         public Vector4 GetRespawnPosition()
         {
-            var prevCpInd = m_nextCheckpoint == 0 ? m_nextCheckpoint : m_nextCheckpoint - 1;
+            var prevCpInd = m_currentCheckpointId == 0 ? m_currentCheckpointId : m_currentCheckpointId - 1;
 
-            var previous_cp = m_checkpoints.ElementAt(prevCpInd);
+            var previous_cp = m_checkpointstwo[prevCpInd];
 
-            return new Vector4(previous_cp.Key.Position, previous_cp.Key.Heading); // possibly heading wrong
+            return new Vector4(previous_cp.Position, previous_cp.Heading); // possibly heading wrong
         }
 
-        [EventHandler("onClientMapStart")]
-        public async void OnClientMapStart()
+        public void SetCheckPoints(List<Chl> checkpoints, float[] headings, float[] scale, List<Sndchk> secondaryCheckpoints = null)
+        {
+            for (int i = 0; i < checkpoints.Count; i++)
+            {
+                m_checkpointstwo.Add(new MapCheckpoint
+                {
+                    Position = new Vector3(checkpoints[i].x, checkpoints[i].y, checkpoints[i].z + 5f),
+                    Heading = headings[i],
+                    Scale = scale[i]
+                });
+            }
+
+            if (secondaryCheckpoints == null)
+                return;
+
+            for (int i = 0; i < secondaryCheckpoints.Count; i++)
+            {
+                m_secondaryCheckpointstwo.Add(new MapCheckpoint
+                {
+                    Position = new Vector3(secondaryCheckpoints[i].x, secondaryCheckpoints[i].y, secondaryCheckpoints[i].z + 5f),
+                    Heading = headings[i],
+                    Scale = scale[i]
+                });
+            }
+        }
+
+        [Tick]
+        public async Task OnCheckpointTick()
         {
             try
             {
-                while (Client.Instance.Game.CurrentMap == null || Client.Instance.Game.CurrentMap.mission.RaceData == null)
-                    await Delay(0);
+                if (GameController.GameState != GameState.ONGOING || m_checkpointstwo.Count == 0 || Game.PlayerPed.CurrentVehicle == null)
+                    return;
 
+                var count = m_checkpointstwo.Count;
 
-                var raceData = Client.Instance.Game.CurrentMap.mission.RaceData;
-
-                var checkpoints = new List<MapCheckpoint>();
-                for (int i = 0; i < raceData.CheckpointTotal; i++)
+                if(m_currentCheckpointId == -1)
                 {
-                    checkpoints.Add(new MapCheckpoint
-                    {
-                        Position = new Vector3(raceData.CheckpointLocations[i].x, raceData.CheckpointLocations[i].y, raceData.CheckpointLocations[i].z + 5f),
-                        Heading = raceData.CheckpointHeadings[i],
-                        Scale = raceData.CheckpointScale[i],
-                        Type = 5
-                    });
+                    m_currentCheckpointId = 0;
+
+                    NewCheckpoints();
                 }
 
-                var secondaryCheckpoints = new List<MapCheckpoint>();
+                float dist = m_checkpointstwo[m_currentCheckpointId].Position.DistanceToSquared2D(Game.PlayerPed.CurrentVehicle.Position);
+                float distSecondary = m_secondaryCheckpointstwo[m_currentCheckpointId].Position.DistanceToSquared2D(Game.PlayerPed.CurrentVehicle.Position);
 
-                for (int i = 0; i < raceData.CheckpointTotal; i++)
+                int totalLaps = Client.Instance.Game.CurrentMap.mission.RaceData.NumberOfLaps;
+
+                if(dist < 100f || distSecondary < 100f)
                 {
-                    secondaryCheckpoints.Add(new MapCheckpoint
-                    {
-                        Position = new Vector3(raceData.SecondaryCheckPointPositions[i].x, raceData.SecondaryCheckPointPositions[i].y, raceData.SecondaryCheckPointPositions[i].z + 5f),
-                        Heading = raceData.CheckpointHeadings[i],
-                        Scale = raceData.CheckpointScale[i],
-                        Type = 5
-                    });
-                }
+                    DeleteCheckpoint(m_checkpointHandle);
+                    m_currentCheckpointBlip.Delete();
 
-                CreateCheckpoints(checkpoints, secondaryCheckpoints);
+                    m_nextCheckpointBlip.Delete();
+
+                    if (m_secondaryCheckpointHandle != -1)
+                    {
+                        DeleteCheckpoint(m_secondaryCheckpointHandle);
+                        m_secondaryCheckpointBlip.Delete();
+                    }
+
+                    m_currentCheckpointId++;
+
+                    if(m_currentCheckpointId == m_checkpointstwo.Count)
+                    {
+                        Logger.Info($"Lap {Client.Instance.Game.GameInfo.CurrentLap}/{totalLaps}");
+                        if(Client.Instance.Game.GameInfo.CurrentLap == totalLaps || totalLaps == 0)
+                        {
+                            Client.Instance.Audio.PlaySound("Checkpoint_Finish", "DLC_Stunt_Race_Frontend_Sounds");
+                            Debug.WriteLine("Finished");
+                            GameController.GameState = GameState.FINISHED;
+
+                            m_currentCheckpointId = -1;
+                            m_checkpointHandle = -1;
+                            m_secondaryCheckpointHandle = -1;
+                            m_checkpointstwo.Clear();
+                            m_secondaryCheckpointstwo.Clear();
+                            m_currentCheckpointBlip = null;
+                            m_secondaryCheckpointBlip = null;
+
+                            var veh = Game.PlayerPed.CurrentVehicle;
+                            await Delay(1500);
+                            
+                            NetworkFadeOutEntity(veh.Handle, true, false);
+
+                            await Delay(1000);
+                            veh.Delete();
+                            return;
+                        }
+
+                        Client.Instance.Game.GameInfo.CurrentLap++;
+
+                        m_currentCheckpointId = 0;
+                    }
+
+                    Client.Instance.Audio.PlaySound("Checkpoint", "DLC_Stunt_Race_Frontend_Sounds");
+
+                    NewCheckpoints();
+                }
             }
             catch (Exception e)
             {
-                Logger.Exception(e, "OnClientMapStart");
+                Logger.Exception(e);
+                await Delay(5000);
             }
             await Task.FromResult(0);
+        }
+
+        private void NewCheckpoints()
+        {
+            var current = m_checkpointstwo[m_currentCheckpointId];
+
+            Checkpoint checkpoint;
+
+            if (m_checkpointstwo.Count == m_currentCheckpointId + 1)
+            {
+                checkpoint = World.CreateCheckpoint(CheckpointIcon.CylinderCheckerboard2, current.Position - new Vector3(0,0,2.5f), Vector3.Zero, 10f, m_cylinderColor);
+                SetCheckpointCylinderHeight(checkpoint.Handle, 9.5f, 9.5f, 6.5f);
+                SetCheckpointIconRgba(checkpoint.Handle, m_iconColor.R, m_iconColor.G, m_iconColor.B, m_iconColor.A);
+                m_checkpointHandle = checkpoint.Handle;
+
+                m_currentCheckpointBlip = World.CreateBlip(current.Position);
+                m_currentCheckpointBlip.Sprite = BlipSprite.RaceFinish;
+                m_currentCheckpointBlip.Color = BlipColor.Blue;
+                return;
+            }
+            
+            var next = m_checkpointstwo[m_currentCheckpointId + 1];
+
+            m_nextCheckpointBlip = World.CreateBlip(next.Position);
+            m_nextCheckpointBlip.Sprite = BlipSprite.Standard;
+            m_nextCheckpointBlip.Color = BlipColor.Yellow;
+            m_nextCheckpointBlip.Scale = 0.5f;
+
+            checkpoint = World.CreateCheckpoint(CheckpointIcon.CylinderDoubleArrow2, current.Position, next.Position, 10f, m_cylinderColor);
+
+            SetCheckpointCylinderHeight(checkpoint.Handle, 9.5f, 9.5f, 6.5f);
+            SetCheckpointIconRgba(checkpoint.Handle, m_iconColor.R, m_iconColor.G, m_iconColor.B, m_iconColor.A);
+
+            m_checkpointHandle = checkpoint.Handle;
+
+            m_currentCheckpointBlip = World.CreateBlip(current.Position);
+            m_currentCheckpointBlip.Sprite = BlipSprite.Standard;
+            m_currentCheckpointBlip.Color = BlipColor.Yellow;
+
+            if (m_secondaryCheckpointstwo[m_currentCheckpointId].Position != new Vector3(0,0,5))
+            {
+                current = m_secondaryCheckpointstwo[m_currentCheckpointId];
+                checkpoint = World.CreateCheckpoint(CheckpointIcon.CylinderDoubleArrow2, current.Position, next.Position, 10f, m_cylinderColor);
+
+                SetCheckpointCylinderHeight(checkpoint.Handle, 9.5f, 9.5f, 6.5f);
+                SetCheckpointIconRgba(checkpoint.Handle, m_iconColor.R, m_iconColor.G, m_iconColor.B, m_iconColor.A);
+
+                m_secondaryCheckpointHandle = checkpoint.Handle;
+
+                m_secondaryCheckpointBlip = World.CreateBlip(current.Position);
+                m_secondaryCheckpointBlip.Sprite = BlipSprite.Standard;
+                m_secondaryCheckpointBlip.Color = BlipColor.Yellow;
+            }
+            else
+            {
+                m_secondaryCheckpointHandle = -1;
+            }
         }
 
         [EventHandler("onClientMapStop")]
         public void OnMapStop()
         {
-            ResetCheckpoints();
-        }
-
-        public void CreateCheckpoints(List<MapCheckpoint> primaryCheckpoints, List<MapCheckpoint> secondaryCheckpoints)
-        {
-            try
+            if (m_currentCheckpointId != -1)
             {
-                ResetCheckpoints();
+                DeleteCheckpoint(m_checkpointHandle);
+                m_currentCheckpointBlip.Delete();
+                m_currentCheckpointBlip = null;
 
-                for (int i = 0; i < primaryCheckpoints.Count; i++)
+                if (m_secondaryCheckpointHandle != -1)
                 {
-                    if(i == 0 || i == 1)
-                    {
-                        var cpIcon = (CheckpointIcon)primaryCheckpoints[i].Type;
-                        var pointTo = primaryCheckpoints[i + 1].Position;
-
-                        var cp = World.CreateCheckpoint(cpIcon, primaryCheckpoints[i].Position, pointTo, 10f, m_cylinderColor);
-                        SetCheckpointCylinderHeight(cp.Handle, 9.5f, 9.5f, 6.5f);
-                        SetCheckpointIconRgba(cp.Handle, m_iconColor.R, m_iconColor.G, m_iconColor.B, m_iconColor.A);
-
-                        bool hasSecondary = secondaryCheckpoints[i].Position != Vector3.Zero;
-                        primaryCheckpoints[i].HasSecondary = hasSecondary;
-
-                        Checkpoint scp = null;
-                        if (hasSecondary)
-                        {
-                            scp = World.CreateCheckpoint(cpIcon, secondaryCheckpoints[i].Position, pointTo, 10f, m_cylinderColor);
-                            SetCheckpointCylinderHeight(scp.Handle, 9.5f, 9.5f, 6.5f);
-                            SetCheckpointIconRgba(scp.Handle, m_iconColor.R, m_iconColor.G, m_iconColor.B, m_iconColor.A);
-                        }
-
-                        m_secondaryCheckpoints.Add(secondaryCheckpoints[i], scp == null ? -1 : scp.Handle);
-                        m_checkpoints.Add(primaryCheckpoints[i], cp.Handle);
-                    }
-                    else
-                    {
-                        m_checkpoints.Add(primaryCheckpoints[i], -1);
-                        m_secondaryCheckpoints.Add(secondaryCheckpoints[i], -1);
-                    }
+                    DeleteCheckpoint(m_secondaryCheckpointHandle);
+                    m_secondaryCheckpointBlip.Delete();
+                    m_secondaryCheckpointBlip = null;
                 }
 
-                Tick += OnCheckPointTick;
-            }
-            catch (Exception e)
-            {
-                Logger.Exception(e, "CreateCheckpoints");
+                m_currentCheckpointId = -1;
+                m_checkpointHandle = -1;
+                m_secondaryCheckpointHandle = -1;
+                m_checkpointstwo.Clear();
+                m_secondaryCheckpointstwo.Clear();
             }
         }
 
-        public async Task OnCheckPointTick()
-        {
-            try
-            {
-                if(m_nextCheckpoint == m_checkpoints.Count)
-                {
-                    ResetCheckpoints();
-
-                    Debug.WriteLine("Finished");
-
-                    GameController.GameState = Enums.GameState.FINISHED;
-                    Tick -= OnCheckPointTick;
-                    return;
-                }
-
-                var currentCheckpoint = m_checkpoints.ElementAt(m_nextCheckpoint);
-
-                bool hasSecondary = currentCheckpoint.Key.HasSecondary;
-
-                var secondaryCheckpoint = hasSecondary ? m_secondaryCheckpoints.ElementAt(m_nextCheckpoint) : default;
-
-                if(Game.PlayerPed.CurrentVehicle == null)
-                {
-                    return;
-                }
-
-                var vehPos = Game.PlayerPed.CurrentVehicle.Position;
-                var isInDistance = vehPos.DistanceToSquared2D(currentCheckpoint.Key.Position) < 100f;
-
-                if(currentCheckpoint.Key.HasSecondary)
-                {
-                    isInDistance = isInDistance || vehPos.DistanceToSquared2D(secondaryCheckpoint.Key.Position) < 100f;
-                }
-
-                if (isInDistance)
-                {
-                    DeleteCheckpoint(currentCheckpoint.Value);
-
-                    if (hasSecondary)
-                        DeleteCheckpoint(secondaryCheckpoint.Value);
-
-                    Client.Instance.Audio.PlaySound("Checkpoint", "DLC_Stunt_Race_Frontend_Sounds");
-
-                    m_nextCheckpoint++;
-
-                    if(m_nextCheckpoint == m_checkpoints.Count)
-                    {
-                        return;
-                    }
-
-                    CreateNewCheckpoint(m_nextCheckpoint);
-
-                    if (hasSecondary)
-                        CreateNewCheckpoint(m_nextCheckpoint, true);
-                }
-            }
-            catch (Exception e)
-            {
-                Logger.Exception(e, "OnCheckPointTick");
-                await Delay(2500);
-            }
-
-            await Task.FromResult(0);
-        }
-
-        private void ResetCheckpoints()
-        {
-            foreach (var cp in m_checkpoints.Values)
-            {
-                if (cp == -1)
-                    continue;
-
-                DeleteCheckpoint(cp);
-            }
-
-            foreach (var cp in m_secondaryCheckpoints.Values)
-            {
-                if (cp == -1)
-                    continue;
-
-                DeleteCheckpoint(cp);
-            }
-
-            m_checkpoints.Clear();
-            m_secondaryCheckpoints.Clear();
-
-            m_nextCheckpoint = 0;
-        }
-
-        private void CreateNewCheckpoint(int nextIdx, bool isSecondary = false)
-        {
-            Dictionary<MapCheckpoint, int> cps = isSecondary ? m_secondaryCheckpoints : m_checkpoints;
-
-            var nextCheckPoint = cps.ElementAt(nextIdx);
-            if (nextCheckPoint.Value == -1)
-            {
-                var pointTo = nextCheckPoint.Key;
-
-                if (m_nextCheckpoint + 1 == cps.Count)
-                {
-                    nextCheckPoint.Key.Type = 4;
-                }
-                else
-                {
-                    pointTo = cps.ElementAt(nextIdx + 1).Key;
-                }
-                var cp = World.CreateCheckpoint((CheckpointIcon)nextCheckPoint.Key.Type, nextCheckPoint.Key.Position, pointTo.Position, 10f, m_cylinderColor);
-                SetCheckpointCylinderHeight(cp.Handle, 9.5f, 9.5f, 6.5f);
-                SetCheckpointIconRgba(cp.Handle, m_iconColor.R, m_iconColor.G, m_iconColor.B, m_iconColor.A);
-
-                cps[cps.ElementAt(nextIdx).Key] = cp.Handle;
-            }
-        }
     }
 }

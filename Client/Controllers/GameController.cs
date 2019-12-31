@@ -27,6 +27,7 @@ namespace Client.Controllers
 
             RequestModel((uint)Game.GenerateHash("prop_mp_boost_01"));
             RequestModel((uint)Game.GenerateHash("prop_mp_boost_0o1"));
+            RequestModel((uint)Game.GenerateHash("s_m_y_robber_01"));
         }
 
         [EventHandler("onClientMapStart")]
@@ -42,8 +43,6 @@ namespace Client.Controllers
             GameInfo.MyPosition = 1;
             GameInfo.PlayerReady = false;
 
-            RequestModel((uint)Game.GenerateHash("s_m_y_robber_01"));
-
             var loadedFile = LoadResourceFile(GetCurrentResourceName(), $"data/maps/{GameInfo.MapFileName}.json");
 
             if (!string.IsNullOrEmpty(loadedFile))
@@ -53,14 +52,17 @@ namespace Client.Controllers
                     CurrentMap = JsonConvert.DeserializeObject<Map>(loadedFile);
                 }
                 catch { Logger.Info("Something went wrong in GameController"); }
-            } else
-            {
-                Logger.Info("This should not happen");
             }
 
             if(CurrentMap != null)
             {
+                var model = CurrentMap.mission.VehicleData.ModelHash[0];
+                GameInfo.VehicleModel = new Model(model != 0 ? model : unchecked((int)VehicleHash.Adder));
                 AddTextEntry("RACING_MAP_NAME", CurrentMap.mission.Generated.MissionName);
+                AddTextEntry("RACING_MAP_LAPS", CurrentMap.mission.RaceData.NumberOfLaps.ToString());
+
+                var raceData = CurrentMap.mission.RaceData;
+                Client.Instance.Checkpoints.SetCheckPoints(raceData.CheckpointLocations.ToList(), raceData.CheckpointHeadings, raceData.CheckpointScale, raceData.SecondaryCheckPointPositions.ToList());
             }
 
             GameState = GameState.LOADING;
@@ -82,7 +84,6 @@ namespace Client.Controllers
             }
 
             GameState = GameState.POST;
-
             await Delay(500);
 
             FreezeEntityPosition(PlayerPedId(), true);
@@ -91,7 +92,7 @@ namespace Client.Controllers
 
             // spectate stuff
 
-            TriggerServerEvent("racing:rotateReady");
+            TriggerServerEvent("racing:finished");
         }
 
         [EventHandler("racing:post")]

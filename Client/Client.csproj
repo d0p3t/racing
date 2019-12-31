@@ -55,9 +55,11 @@
     <Compile Include="Controllers\CheckpointController.cs" />
     <Compile Include="Controllers\DebugController.cs" />
     <Compile Include="Controllers\GameController.cs" />
+    <Compile Include="Controllers\LobbyController.cs" />
     <Compile Include="Controllers\MapController.cs" />
     <Compile Include="Controllers\PropController.cs" />
     <Compile Include="Controllers\SpawnController.cs" />
+    <Compile Include="Controllers\VehicleController.cs" />
     <Compile Include="Enums\GameState.cs" />
     <Compile Include="Enums\MapEnums.cs" />
     <Compile Include="Logger.cs" />

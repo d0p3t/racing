@@ -15,10 +15,10 @@ namespace Client
         public CheckpointController Checkpoints { get; private set; }
         public DebugController Debug { get; private set; }
         public GameController Game { get; private set; }
+        public LobbyController Lobby { get; private set; }
         public PropController Props { get; private set; }
         public SpawnController Spawn { get; private set; }
-
-        // private bool m_setupComplete = false;
+        public VehicleController Vehicle { get; private set; }
 
         public Client()
         {
@@ -27,40 +27,30 @@ namespace Client
             Checkpoints = new CheckpointController();
             Debug = new DebugController();
             Game = new GameController();
+            Lobby = new LobbyController();
             Props = new PropController();
             Spawn = new SpawnController();
+            Vehicle = new VehicleController();
 
             RegisterScript(Audio);
             RegisterScript(Checkpoints);
             RegisterScript(Debug);
             RegisterScript(Game);
+            RegisterScript(Lobby);
             RegisterScript(Props);
             RegisterScript(Spawn);
+            RegisterScript(Vehicle);
 
             Instance = this;
         }
 
-        //[Tick]
-        //public async Task SetupTick()
-        //{
-        //    try
-        //    {
-        //        if (m_setupComplete)
-        //        {
-        //            Tick -= SetupTick;
-        //            return;
-        //        }
+        [EventHandler("onClientResourceStart")]
+        public void OnClientResourceStart(string resource)
+        {
+            if (CitizenFX.Core.Native.API.GetCurrentResourceName() != resource)
+                return;
 
-        //        // TriggerEvent("racing_firstLoad");
-        //        m_setupComplete = true;
-        //    }
-        //    catch (Exception e)
-        //    {
-        //        Logger.Exception(e, "SetupTick");
-        //        await Delay(5000);
-        //    }
-
-        //    await Task.FromResult(0);
-        //}
+            TriggerServerEvent("racing:playerJoined");
+        }
     }
 }

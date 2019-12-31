@@ -38,19 +38,9 @@ namespace Client.Controllers
 
         }
 
-        [EventHandler("onClientGameTypeStart")]
-        public void OnClientGameTypeStart()
-        {
-            TriggerServerEvent("onPlayerJoining");
-
-            N_0xf7b79a50b905a30d(-8192.0f, -8192.0f, 8192.0f, 8192.0f);
-        }
-
         [EventHandler("onClientMapStop")]
         public void OnMapStop()
         {
-            Game.PlayerPed.Position = new Vector3(0.0f, 0.0f, 0.0f);
-
             DisplayRadar(false);
 
             if(GameController.GameState != GameState.INIT)
@@ -73,10 +63,12 @@ namespace Client.Controllers
         {
             Exports["spawnmanager"].setAutoSpawn(false);
 
+            RequestModel((uint)Game.GenerateHash("s_m_y_robber_01"));
+
             m_assignedGridSpawn = null;
             m_gridSpawns.Clear();
 
-            while(Client.Instance.Game.CurrentMap == null)
+            while (Client.Instance.Game.CurrentMap == null)
             {
                 await Delay(0);
             }
@@ -90,10 +82,15 @@ namespace Client.Controllers
 
                 m_gridSpawns.Add(gs);
             }
-
             m_spawning = false;
             m_hasSpawned = false;
             m_firstSpawn = true;
+        }
+
+        [EventHandler("racing:spawn")]
+        public void ChangeState()
+        {
+            m_hasSpawned = false;
         }
 
         [Tick]
@@ -101,71 +98,50 @@ namespace Client.Controllers
         {
             try
             {
-                if (!m_hasSpawned && !m_spawning && m_gridSpawns.Count > 0)
+                if (!m_hasSpawned && !m_spawning)
                 {
-                    if(GameController.GameState == GameState.INIT || GameController.GameState == GameState.LOADING || m_assignedGridSpawn == null)
-                    {
+                    var state = GameController.GameState;
+
+                    if (state != GameState.LOADING && state != GameState.VEHICLE_SELECT && state != GameState.PRE_COUNTDOWN && state != GameState.ONGOING)
                         return;
-                    }
 
                     m_spawning = true;
 
-                    float x, y, z;
-                    float heading = 0;
+                    SetLoadingPromptTextEntry("FMMC_PLYLOAD");
+                    ShowLoadingPrompt(1);
 
-                    if(!m_firstSpawn)
-                    {
-                        var pos = Client.Instance.Checkpoints.GetRespawnPosition();
+                    var pos = GetSpawnPosition();
 
-                        x = pos.X;
-                        y = pos.Y;
-                        z = pos.Z;
-                        heading = pos.W;
-                    }
-                    else
-                    {
-                        x = m_assignedGridSpawn.Position.X;
-                        y = m_assignedGridSpawn.Position.Y;
-                        z = m_assignedGridSpawn.Position.Z;
-                        heading = m_assignedGridSpawn.Heading;
-                    }
+                    Logger.Info($"Spawning at {pos.X}, {pos.Y}, {pos.Z}, {pos.W}");
 
-                    RequestModel((uint)Game.GenerateHash("s_m_y_robber_01"));
+                    var modelHash = (uint)Game.GenerateHash(Client.Instance.Game.GameInfo.PlayerModel);
+
+                    if (!IsModelValid(modelHash) || !IsModelInCdimage(modelHash))
+                        return;
 
                     Exports["spawnmanager"].forceRespawn();
 
                     Exports["spawnmanager"].spawnPlayer(new
                     {
-                        x, y, z,
-                        heading,
-                        model = (uint)Game.GenerateHash("s_m_y_robber_01"),
-                        skipFade = true
+                        x = pos.X, y = pos.Y, z = pos.Z,
+                        heading = pos.W,
+                        model = modelHash,
+                        skipFade = m_firstSpawn,
+                        skipFadeIn = true
                     }, new Action(async () =>
                     {
-                        Game.PlayerPed.Weapons.RemoveAll();
+                        PostSpawn(pos);
 
-                        SetPedDefaultComponentVariation(Game.PlayerPed.Handle);
+                        await Delay(2000);
+                        RemoveLoadingPrompt();
 
-                        DisplayRadar(true);
-
-                        SetMaxWantedLevel(0);
-
-                        // debug vehicle for now. in future should be chosen vehicle
-                        var model = new Model(VehicleHash.Bifta);
-
-                        await model.Request(5000);
-
-                        var veh = await World.CreateVehicle(model, new Vector3(x, y, z), heading);
-
-                        if(veh != null)
+                        if(Screen.Fading.IsFadedOut)
                         {
-                            veh.PlaceOnGround();
-                            Game.PlayerPed.SetIntoVehicle(veh, VehicleSeat.Driver);
-                            veh.PreviouslyOwnedByPlayer = true;
-                            Game.PlayerPed.CanBeDraggedOutOfVehicle = false;
-                            SetVehicleDoorsLockedForAllPlayers(veh.Handle, true);
-
-                            veh.MarkAsNoLongerNeeded();
+                            Screen.Fading.FadeIn(500);
+                            while(!Screen.Fading.IsFadedIn)
+                            {
+                                await Delay(0);
+                            }
                         }
 
                         if (GetPlayerSwitchState() != 0 && GetPlayerSwitchState() != 12)
@@ -178,45 +154,39 @@ namespace Client.Controllers
                             }
                         }
 
-                        if (m_firstSpawn)
-                        {
-                            TriggerServerEvent("racing:announceSpawnedRaceStart");
-                        }
-
+                        Logger.Info("Done spawning");
                         m_spawning = false;
                         m_firstSpawn = false;
-
-                        Logger.Info("Done spawning!");
                     }));
 
                     m_hasSpawned = true;
                 }
 
-                if(Game.PlayerPed.IsDead && !m_spawning)
+                if (Game.PlayerPed.IsDead && !m_spawning)
                 {
                     m_hasSpawned = false;
                 }
 
-                // Should go elsewhere
-                if(GameController.GameState == GameState.ONGOING && Client.Instance.Game.CurrentMap.mission.VehicleData.col[0] != -1)
-                {
-                    var cV = Game.PlayerPed.CurrentVehicle;
+                // Should go elsewhere - This is for "no collission" maps
+                // Client.Instance.Game.CurrentMap.mission.VehicleData.col[0] != -1
+                //if (GameController.GameState == GameState.ONGOING)
+                //{
+                //    var cV = Game.PlayerPed.CurrentVehicle;
 
-                    if (cV != null)
-                    {
-                        foreach (var p in Players)
-                        {
-                            var pV = p.Character.CurrentVehicle;
-                            if(pV != null)
-                            {
-                                SetEntityNoCollisionEntity(pV.Handle, cV.Handle, false);
-                                SetEntityAlpha(pV.Handle, 180, 0);
-                                SetEntityAlpha(p.Character.Handle, 180, 0);
-                            }
-                        }
-                    }
-                }
-
+                //    if (cV != null)
+                //    {
+                //        foreach (var p in Players)
+                //        {
+                //            var pV = p.Character.CurrentVehicle;
+                //            if(pV != null)
+                //            {
+                //                SetEntityNoCollisionEntity(pV.Handle, cV.Handle, false);
+                //                SetEntityAlpha(pV.Handle, 180, 0);
+                //                SetEntityAlpha(p.Character.Handle, 180, 0);
+                //            }
+                //        }
+                //    }
+                //}
             }
             catch (Exception e)
             {
@@ -243,12 +213,6 @@ namespace Client.Controllers
             }
         }
 
-        [EventHandler("racing_firstLoad")]
-        public void FirstLoad()
-        {
-            // Tick += OnFirstLoad;
-        }
-
         [Tick]
         public async Task OnPopulationTick()
         {
@@ -260,45 +224,81 @@ namespace Client.Controllers
 
             await Task.FromResult(0);
         }
-
-        public async Task OnFirstLoad()
+    
+        private Vector4 GetSpawnPosition()
         {
-            try
+            Vector4 spawnPosition = Vector4.Zero;
+            switch (GameController.GameState)
             {
-                if (Screen.Fading.IsFadedIn)
-                {
-                    Screen.Fading.FadeOut(0);
-                    while (Screen.Fading.IsFadedIn)
+                case GameState.LOADING:
+                    spawnPosition = LobbyController.VotePosition;
+                    break;
+                case GameState.VEHICLE_SELECT:
+                    var lobbyPos = Client.Instance.Game.CurrentMap.mission.Generated.LobbyStartLocation;
+                    var heading = Client.Instance.Game.CurrentMap.mission.Generated.LobbyCamHeading;
+                    spawnPosition = new Vector4(lobbyPos.x, lobbyPos.y, lobbyPos.z, heading);
+                    break;
+                case GameState.PRE_COUNTDOWN:
+                    if(m_assignedGridSpawn != null)
+                        spawnPosition = new Vector4(m_assignedGridSpawn.Position.X, m_assignedGridSpawn.Position.Y, m_assignedGridSpawn.Position.Z, m_assignedGridSpawn.Heading);
+                    break;
+                case GameState.ONGOING:
+                    spawnPosition = Client.Instance.Checkpoints.GetRespawnPosition();
+                    break;
+                case GameState.INIT: // these cases will never happen
+                case GameState.READY:
+                case GameState.COUNTDOWN:
+                case GameState.FINISHED:
+                case GameState.SPECTATING:
+                case GameState.POST:
+                    break;
+            }
+
+            return spawnPosition;
+        }
+
+        private async void PostSpawn(Vector4 pos)
+        {
+            World.RenderingCamera = null;
+            Game.PlayerPed.Weapons.RemoveAll();
+            SetPedDefaultComponentVariation(Game.PlayerPed.Handle);
+            SetMaxWantedLevel(0);
+
+            switch (GameController.GameState)
+            {
+                case GameState.INIT:
+                case GameState.READY:
+                case GameState.COUNTDOWN:
+                case GameState.FINISHED:
+                case GameState.SPECTATING:
+                case GameState.POST:
+                    break;
+                case GameState.LOADING:
+                    Game.PlayerPed.IsPositionFrozen = true;
+                    break;
+                case GameState.VEHICLE_SELECT:
+                    Game.PlayerPed.IsPositionFrozen = true;
+                    break;
+                case GameState.PRE_COUNTDOWN:
+                    DisplayRadar(true);
+                    var model = Client.Instance.Game.GameInfo.VehicleModel;
+                    Logger.Info($"Going to spawn {model.Hash}");
+                    await model.Request(5000);
+                    var veh = await World.CreateVehicle(model, new Vector3(pos.X, pos.Y, pos.Z), pos.W);
+                    Logger.Info("Spawned vehicle");
+                    if (veh != null)
                     {
-                        await Delay(0);
+                        veh.PlaceOnGround();
+                        Game.PlayerPed.SetIntoVehicle(veh, VehicleSeat.Driver);
+                        veh.PreviouslyOwnedByPlayer = true;
+                        Game.PlayerPed.CanBeDraggedOutOfVehicle = false;
+                        SetVehicleDoorsLockedForAllPlayers(veh.Handle, true);
+                        SetVehicleDoorsLocked(veh.Handle, 4);
+                        veh.IsPositionFrozen = true;
+                        veh.MarkAsNoLongerNeeded();
                     }
-                }
-
-                await Game.Player.ChangeModel(new Model(PedHash.Skater01AMM));
-
-                if (Game.PlayerPed.IsDead)
-                {
-                    NetworkResurrectLocalPlayer(228.1f, -1006.0f, 100.0f, 0.0f, true, true);
-                }
-
-                SetLoadingPromptTextEntry("FMMC_PLYLOAD");
-                Screen.LoadingPrompt.Show();
-
-                Game.PlayerPed.Position = new Vector3(-2406.319f, 2968.841f, 1182.948f);
-
-                Game.PlayerPed.IsPositionFrozen = false;
-
-                StopPlayerSwitch();
-
-                Tick -= OnFirstLoad;
+                    break;
             }
-            catch (Exception e)
-            {
-                Logger.Exception(e, "OnFirstLoad");
-                await Delay(5000);
-            }
-
-            await Task.FromResult(0);
         }
     }
 }

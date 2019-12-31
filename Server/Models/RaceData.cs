@@ -1,25 +1,27 @@
-﻿using System.Collections.Generic;
+﻿using CitizenFX.Core;
+using static CitizenFX.Core.Native.API;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace Server.Models
 {
     public enum GameState
     {
-        INIT,
-        LOADING,
-        SPECTATING,
-        VEHICLE_SELECT,
-        READY,
-        PRE_COUNTDOWN,
-        COUNTDOWN,
-        ONGOING,
-        FINISHED,
-        POST
+        INIT, // Ready for new map
+        LOADING, // Loading the map file and vehicle select (or spawn into race if race ongoing)
+        VEHICLE_SELECT, // Players choosing vehicles and props spawning
+        READY, // Props can still spawn and player is ready for race
+        PRE_COUNTDOWN, // Loaded into race and getting countdown ready
+        COUNTDOWN, // 3,2,1, GO
+        ONGOING, // Race ongoing
+        FINISHED, // Player is finished and will now go to spectating
+        SPECTATING, // spectating waiting for others to finish
+        POST // race results screen
     }
 
     public class RaceData
     {
-        public GameState GameState { get; set; } = GameState.INIT;
+        public GameState GameState { get; private set; } = GameState.INIT;
         public List<PlayerRaceData> PlayersInRace { get; set; } = new List<PlayerRaceData>();
         public long FirstFinishTime { get; set; }
 
@@ -43,6 +45,14 @@ namespace Server.Models
             return PlayersInRace.All(p => p.GameState == state);
         }
 
+        public void ChangeGlobalGameState(GameState state)
+        {
+            if (state == GameState.INIT)
+                PlayersInRace.Clear();
+
+            GameState = state;
+        }
+
         public bool IsFirstPlayerToFinish()
         {
             var count = 0;
@@ -57,7 +67,7 @@ namespace Server.Models
 
             if (count == 1)
             {
-                FirstFinishTime = CitizenFX.Core.Native.API.GetGameTimer();
+                FirstFinishTime = GetGameTimer();
                 return true;
             }
 

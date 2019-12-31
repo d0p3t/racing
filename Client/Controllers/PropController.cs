@@ -47,18 +47,22 @@ namespace Client.Controllers
         {
             try
             {
-                if(!m_spawnProps || GameController.GameState != GameState.LOADING)
+                if(!m_spawnProps)
                 {
                     return;
                 }
 
-                Debug.WriteLine("ok loading!");
+                if (GameController.GameState != GameState.VEHICLE_SELECT)
+                    return;
+
+                m_spawnProps = false;
+
+                Logger.Info("Spawning Props");
                 await SpawnStaticProps(Client.Instance.Game.CurrentMap.mission.PropData);
                 await SpawnDynamicProps(Client.Instance.Game.CurrentMap.mission.DynamicProps);
 
-                GameController.GameState = GameState.VEHICLE_SELECT;
+                Logger.Info("Spawned Props");
 
-                m_spawnProps = false;
             }
             catch (Exception e)
             {
