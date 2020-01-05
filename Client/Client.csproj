@@ -59,11 +59,13 @@
     <Compile Include="Controllers\MapController.cs" />
     <Compile Include="Controllers\PropController.cs" />
     <Compile Include="Controllers\SpawnController.cs" />
+    <Compile Include="Controllers\TimerBarController.cs" />
     <Compile Include="Controllers\VehicleController.cs" />
     <Compile Include="Enums\GameState.cs" />
     <Compile Include="Enums\MapEnums.cs" />
     <Compile Include="Logger.cs" />
     <Compile Include="Models\GameInfo.cs" />
+    <Compile Include="Models\Hud\TimerBars.cs" />
     <Compile Include="Models\MapCheckpoint.cs" />
     <Compile Include="Models\MapInfo.cs" />
     <Compile Include="Models\Mapping\Generated.cs" />

@@ -14,7 +14,7 @@ namespace Client.Controllers
     public class SpawnController : BaseController
     {
         private bool m_hasSpawned = true;
-        private bool m_spawning;
+        private bool m_spawning = false;
         private bool m_firstSpawn = true;
 
         private List<GridSpawnPoint> m_gridSpawns = new List<GridSpawnPoint>();
@@ -58,8 +58,7 @@ namespace Client.Controllers
             DoScreenFadeOut(0);
         }
 
-        [EventHandler("onClientMapStart")]
-        public async void MapStart()
+        public void MapStart()
         {
             Exports["spawnmanager"].setAutoSpawn(false);
 
@@ -67,11 +66,6 @@ namespace Client.Controllers
 
             m_assignedGridSpawn = null;
             m_gridSpawns.Clear();
-
-            while (Client.Instance.Game.CurrentMap == null)
-            {
-                await Delay(0);
-            }
 
             var md = Client.Instance.Game.CurrentMap.mission;
 
@@ -82,6 +76,8 @@ namespace Client.Controllers
 
                 m_gridSpawns.Add(gs);
             }
+
+            Logger.Info($"Added {m_gridSpawns.Count} gridspawns");
             m_spawning = false;
             m_hasSpawned = false;
             m_firstSpawn = true;
@@ -204,6 +200,7 @@ namespace Client.Controllers
                 while (m_gridSpawns == null || m_gridSpawns.Count == 0)
                     await Delay(0);
 
+                Logger.Info($"spotIdx {spotIdx} max index {m_gridSpawns.Count - 1}");
                 m_assignedGridSpawn = m_gridSpawns.ElementAt(spotIdx);
             }
             catch (Exception e)

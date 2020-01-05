@@ -9,5 +9,7 @@ namespace Client.Models
         public int Type { get; set; }
         public float Scale { get; set; }
         public bool HasSecondary { get; set; }
+        public float ZAxis { get; set; }
+        public float TriggerRadius { get; set; }
     }
 }

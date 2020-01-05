@@ -72,6 +72,7 @@ namespace Client.Controllers
                 else
                 {
                     m_countdown.CallFunction("SET_MESSAGE", text, 240, 200, 80, true);
+                    
                 }
 
                 HideHudAndRadarThisFrame();
@@ -79,7 +80,7 @@ namespace Client.Controllers
             }
             catch (Exception e)
             {
-                Logger.Exception(e);
+                Logger.Exception(e, "LobbyController");
                 await Delay(5000);
             }
         }
@@ -88,40 +89,53 @@ namespace Client.Controllers
         [Tick]
         public async Task OnLobbyTick()
         {
-            if(GameController.GameState == GameState.LOADING)
+            try
             {
-                await Delay(5000);
-                GameController.GameState = GameState.VEHICLE_SELECT;
-                TriggerEvent("racing:spawn");
+                if (GameController.GameState == GameState.LOADING)
+                {
+                    await Delay(2000);
+                    Client.Instance.Game.GameStateListener.Invoke(GameState.VEHICLE_SELECT);
+                    TriggerEvent("racing:spawn");
 
-                await Delay(5000);
-                GameController.GameState = GameState.PRE_COUNTDOWN;
-                TriggerEvent("racing:spawn");
+                    await Delay(3000);
 
-                await Delay(1000);
-                // Client.Instance.Audio.PlaySound("DLC_STUNT_RACE_START", "DLC_Stunt_Race_Frontend_Sounds");
-                CitizenFX.Core.UI.Screen.ShowNotification("Countdown 3,2,1...");
-                GameController.GameState = GameState.COUNTDOWN;
-                await Delay(2000);
-                show = true;
-                Client.Instance.Audio.PlaySound("Countdown_3", "DLC_Stunt_Race_Frontend_Sounds");
-                await Delay(1000);
-                countdown--;
-                Client.Instance.Audio.PlaySound("Countdown_2", "DLC_Stunt_Race_Frontend_Sounds");
+                    while (!Client.Instance.Props.DoneSpawningProps)
+                    {
+                        // Logger.Info("nope");
+                        await Delay(0);
+                    }
+                    Client.Instance.Game.GameStateListener.Invoke(GameState.PRE_COUNTDOWN);
+                    TriggerEvent("racing:spawn");
 
-                await Delay(1000);
-                countdown--;
-                Client.Instance.Audio.PlaySound("Countdown_1", "DLC_Stunt_Race_Frontend_Sounds");
+                    await Delay(5000);
+                    Client.Instance.Game.GameStateListener.Invoke(GameState.COUNTDOWN);
 
-                await Delay(1000);
-                countdown--;
-                Client.Instance.Audio.PlaySound("Countdown_Go", "DLC_Stunt_Race_Frontend_Sounds");
-                Screen.ShowNotification("GO!!!");
-                GameController.GameState = GameState.ONGOING;
+                    await Delay(2000);
 
-                await Delay(1000);
-                show = false;
+                    show = true;
+
+                    Client.Instance.Audio.PlaySound($"Countdown_{countdown}", "DLC_Stunt_Race_Frontend_Sounds");
+                    await Delay(1000);
+                    countdown--;
+                    Client.Instance.Audio.PlaySound($"Countdown_{countdown}", "DLC_Stunt_Race_Frontend_Sounds");
+                    await Delay(1000);
+                    countdown--;
+                    Client.Instance.Audio.PlaySound($"Countdown_{countdown}", "DLC_Stunt_Race_Frontend_Sounds");
+                    await Delay(1000);
+                    countdown--;
+                    Client.Instance.Audio.PlaySound("Countdown_Go", "DLC_Stunt_Race_Frontend_Sounds");
+                    Client.Instance.TimerBars.Enabled(true);
+                    Client.Instance.Game.GameStateListener.Invoke(GameState.ONGOING);
+                    await Delay(1000);
+                    show = false;
+                }
             }
+            catch (Exception e)
+            {
+                Logger.Exception(e, "OnLobbyTick");
+                await Delay(5000);
+            }
+
         }
     }
 }

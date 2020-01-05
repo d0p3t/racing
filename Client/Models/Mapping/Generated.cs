@@ -5894,7 +5894,9 @@ namespace Client.Models.Mapping
         public int[] prpct { get; set; }
         public int[] prpdypil { get; set; }
         public int[] prplod { get; set; }
-        public int[] prpsba { get; set; }
+
+        [JsonProperty("prpsba")]
+        public int[] PropSpeedBoostArgs { get; set; }
         public int[] prpsdp0 { get; set; }
         public int[] prpsdp1 { get; set; }
         public int[] prpsdp2 { get; set; }
@@ -6158,6 +6160,12 @@ namespace Client.Models.Mapping
 
         [JsonProperty("chs")]
         public float[] CheckpointScale { get; set; }
+
+        [JsonProperty("rndchk")] // eeeeee
+        public bool[] RoundCheckpoint { get; set; }
+
+        [JsonProperty("rndchks")]
+        public bool[] RoundCheckpointSecondary { get; set; }
         public float[] chs2 { get; set; }
         public int[] chsto { get; set; }
         public int[] chstos { get; set; }
@@ -6618,7 +6626,9 @@ namespace Client.Models.Mapping
         [JsonProperty("roty")]
         public object[] RotationY { get; set; }
         public object[] rput { get; set; }
-        public object[] sub { get; set; }
+
+        [JsonProperty("sub")]
+        public object[] WEaponHashesSubType { get; set; }
         public int time { get; set; }
 
         [JsonProperty("type")]

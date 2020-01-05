@@ -11,35 +11,29 @@ namespace Client.Controllers
 {
     public class PropController : BaseController
     {
+        private static List<int> trafficSignalHashes = new List<int> { 1043035044 }; // eeeee worried. should not need this?!?!?!
         // private static List<Prop> m_spawnedStaticProps = new List<Prop>();
         // private static List<Prop> m_spawnedDynamicProps = new List<Prop>();
 
-        private Dhprop m_toDeleteTempProps;
-        private int m_deletedTempPropsCount = 0;
+        private static List<int> m_spawnedProps = new List<int>();
 
-        private static List<int> trafficSignalHashes = new List<int> { -655644382, 862871082, 1043035044 };
+        private Dhprop m_toDeleteTempProps = null;
 
         private bool m_spawnProps = false;
+        private bool m_deleteTempPropsEnabled = false;
+
+        public bool DoneSpawningProps { get; private set; } = false;
 
         internal PropController() : base(nameof(PropController)) { }
 
-        [EventHandler("onClientMapStart")]
-        public async void OnClientMapStart()
+        [EventHandler("onClientMapStop")]
+        public void OnClientMapStop()
         {
-            try
-            {
-                while (Client.Instance.Game.CurrentMap == null)
-                    await Delay(0);
+            DeleteSpawnedProps();
 
-                DeleteMapProps(Client.Instance.Game.CurrentMap.mission.DeleteProps);
-
-                m_spawnProps = true;
-            }
-            catch (Exception e)
-            {
-                Logger.Exception(e, "PropController:onClientMapStart");
-            }
-            await Task.FromResult(0);
+            m_deleteTempPropsEnabled = false;
+            m_spawnProps = false;
+            DoneSpawningProps = false;
         }
 
         [Tick]
@@ -47,28 +41,74 @@ namespace Client.Controllers
         {
             try
             {
-                if(!m_spawnProps)
+                if(!m_spawnProps || GameController.GameState != GameState.VEHICLE_SELECT) // only load props in vehicle select
                 {
                     return;
                 }
 
-                if (GameController.GameState != GameState.VEHICLE_SELECT)
-                    return;
+                m_spawnProps = false; // only spawn once
 
-                m_spawnProps = false;
+                DoneSpawningProps = false;
+                Logger.Info($"We got {Client.Instance.Game.CurrentMap.mission.PropData.ModelName.Length} props to spawn");
 
-                Logger.Info("Spawning Props");
                 await SpawnStaticProps(Client.Instance.Game.CurrentMap.mission.PropData);
+                Logger.Info("Done spawning static");
                 await SpawnDynamicProps(Client.Instance.Game.CurrentMap.mission.DynamicProps);
-
-                Logger.Info("Spawned Props");
-
+                DoneSpawningProps = true;
             }
             catch (Exception e)
             {
                 Logger.Exception(e, "PropController:OnTick");
                 await Delay(5000);
             }
+        }
+
+        [Tick]
+        public async Task DeleteTempPropsTick()
+        {
+            try
+            {
+                await Delay(1000);
+
+                if(!m_deleteTempPropsEnabled || m_toDeleteTempProps == null)
+                {
+                    return;
+                }
+
+                var nearbyProps = World.GetAllProps().ToList();
+
+                var toKeep = new List<Prop>();
+
+                foreach (var prop in nearbyProps)
+                {
+                    // we don't want this but somehow some traffic lights are not in Dhprop in some maps that have them literally on the track.
+                    if(trafficSignalHashes.Exists(t => t == prop.Model.Hash)) // && m_toDeleteTempProps.pos.Any(p => pos.DistanceToSquared2D(new Vector3(p.x, p.y, p.z)) < 12f)
+                    {
+                        SafeDelete(prop.Handle);
+                        continue;
+                    }
+
+                    toKeep.Add(prop);
+                }
+
+                for (int i = 0; i < m_toDeleteTempProps.no; i++)
+                {
+                    var coords = new Vector3(m_toDeleteTempProps.pos[i].x, m_toDeleteTempProps.pos[i].y, m_toDeleteTempProps.pos[i].z);
+
+                    var prop = toKeep.FirstOrDefault(p => p.Position.DistanceToSquared2D(coords) < 25f);
+                    if (prop != null)
+                    {
+                        SafeDelete(prop.Handle);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Exception(e, "PropController:DeleteTempPropsTick");
+                await Delay(5000);
+            }
+
+            await Task.FromResult(0);
         }
 
         public async Task<bool> SpawnStaticProps(PropData propData)
@@ -78,47 +118,44 @@ namespace Client.Controllers
                 if (propData.Total < 1) return true;
 
                 int count = 0;
+                List<uint> hashesToUnload = new List<uint>();
 
-                List<uint> m_hashesToUnload = new List<uint>();
                 for (int i = 0; i < propData.Total; i++)
                 {
-                    var pos = new Vector3(propData.Location[i].x, propData.Location[i].y, propData.Location[i].z);
-                    var rot = new Vector3(propData.Rotation[i].x, propData.Rotation[i].y, propData.Rotation[i].z);
-                    var model = new Model(propData.ModelName[i]);
-
                     var hash = (uint)propData.ModelName[i];
-                    RequestModel(hash);
 
-                    var start = GetGameTimer();
-
-                    while (!HasModelLoaded(hash))
-                    {
-                        if (GetGameTimer() - start > 1000)
-                        {
-                            break;
-                        }
-                        await Delay(0);
-                    }
-
-                    var prop = new Prop(CreateObjectNoOffset((uint)model.Hash, pos.X, pos.Y, pos.Z, false, true, false));
-
-                    if(prop == null)
+                    // probably never 0, but you never know. it's R*
+                    // also if any maps contains v1604+ hashes
+                    if (hash == 0 || !IsModelValid(hash) || !IsModelInCdimage(hash)) 
                     {
                         continue;
                     }
 
-                    prop.Rotation = rot;
+                    RequestModel(hash);
+                    while (!HasModelLoaded(hash))
+                    {
+                        await Delay(0);
+                    }
 
-                    prop.IsPositionFrozen = true;
-                    SetObjectTextureVariant(prop.Handle, propData.PropVariation[i]);
-                    //prop.LodDistance = propData.LODDistance[i];
+                    var prop = CreateObjectNoOffset(hash, propData.Location[i].x, propData.Location[i].y, propData.Location[i].z, false, true, false);
 
-                    m_hashesToUnload.Add(hash);
+                    if (prop == 0)
+                    {
+                        continue;
+                    }
+
+                    SetEntityRotation(prop, propData.Rotation[i].x, propData.Rotation[i].y, propData.Rotation[i].z, 2, true);
+                    FreezeEntityPosition(prop, true);
+                    SetObjectTextureVariant(prop, propData.PropVariation[i]);
+
+                    m_spawnedProps.Add(prop);
+                    hashesToUnload.Add(hash);
 
                     count++;
                 }
 
-                foreach (var hash in m_hashesToUnload)
+                // unload later to avoid waiting for model loading when used multiple times
+                foreach (var hash in hashesToUnload)
                 {
                     SetModelAsNoLongerNeeded(hash);
                 }
@@ -138,8 +175,6 @@ namespace Client.Controllers
         {
             try
             {
-                // DeleteSpawnedProps(m_spawnedDynamicProps);
-
                 if (dynamicProps.Total < 1) return true;
 
                 var count = 0;
@@ -152,16 +187,15 @@ namespace Client.Controllers
                     var model = new Model(dynamicProps.ModelName[i]);
 
                     var hash = (uint)dynamicProps.ModelName[i];
+
+                    if (hash == 0 || !IsModelValid(hash) || !IsModelInCdimage(hash))
+                    {
+                        continue;
+                    }
+
                     RequestModel(hash);
-
-                    var start = GetGameTimer();
-
                     while (!HasModelLoaded(hash))
                     {
-                        if(GetGameTimer() - start > 1000)
-                        {
-                            break;
-                        }
                         await Delay(0);
                     }
 
@@ -173,10 +207,10 @@ namespace Client.Controllers
                     }
 
                     prop.Rotation = rot;
-                    // prop.Heading = dynamicProps.Heading[i]; // yea its not heading
+
                     SetObjectTextureVariant(prop.Handle, dynamicProps.PropVariation[i]);
 
-                    // m_spawnedDynamicProps.Add(prop);
+                    m_spawnedProps.Add(prop.Handle);
                     m_hashesToUnload.Add(hash);
                     count++;
                 }
@@ -197,19 +231,18 @@ namespace Client.Controllers
             return true;
         }
 
-        public void DeleteMapProps(Dhprop deleteProps)
+        public void LoadMapProps(Dhprop deleteProps)
         {
             try
             {
-                if(deleteProps.no < 1)
+                if (deleteProps.no > 0)
                 {
-                    return;
+                    m_toDeleteTempProps = deleteProps;
+                    m_deleteTempPropsEnabled = true;
                 }
 
-                m_toDeleteTempProps = deleteProps;
-                m_deletedTempPropsCount = 0;
-
-                Tick += DeleteTempPropsTick;
+                m_spawnProps = true;
+                Logger.Info("Ok lets load");
             }
             catch (Exception e)
             {
@@ -217,84 +250,23 @@ namespace Client.Controllers
             }
         }
 
-        public async Task DeleteTempPropsTick()
+        private void DeleteSpawnedProps()
         {
-            try
+            if (m_spawnedProps.Count != 0)
             {
-                if(m_toDeleteTempProps == null)
+                foreach (var prop in m_spawnedProps)
                 {
-                    return;
+                    SafeDelete(prop);
                 }
-
-                if(!m_toDeleteTempProps.mn.Any(p => p != -1))
-                {
-                    Logger.Info("Done deleting all temp props");
-                    Tick -= DeleteTempPropsTick;
-                    return;
-                }
-
-                var nearbyProps = World.GetAllProps().ToList();
-
-                List<Prop> toKeep = new List<Prop>();
-
-                foreach (var prop in nearbyProps)
-                {
-                    if(trafficSignalHashes.Exists(t => t == prop.Model.Hash))
-                    {
-                        
-                        prop.Delete();
-                        continue;
-                    }
-
-                    toKeep.Add(prop);
-                }
-
-                nearbyProps = toKeep;
-
-                for (int i = 0; i < m_toDeleteTempProps.no; i++)
-                {
-                    if(trafficSignalHashes.Exists(t => t == m_toDeleteTempProps.mn[i]))
-                    {
-                        m_toDeleteTempProps.mn[i] = -1;
-                        continue;
-                    }
-
-                    if (m_toDeleteTempProps.mn[i] == -1)
-                        continue;
-
-                    var coords = new Vector3(m_toDeleteTempProps.pos[i].x, m_toDeleteTempProps.pos[i].y, m_toDeleteTempProps.pos[i].z);
-
-                    var prop = nearbyProps.FirstOrDefault(p => p.Position.DistanceToSquared2D(coords) < 12f);
-                    if (prop != null)
-                    {
-                        Logger.Info("We found an object! Deleting it now...");
-                        m_toDeleteTempProps.mn[i] = -1;
-                        prop.Delete();
-                    }
-                }
-
-                await Delay(1000);
+                m_spawnedProps.Clear();
             }
-            catch (Exception e)
-            {
-                Logger.Exception(e, "DeleteTempPropsTick");
-                await Delay(2500);
-            }
-
-            await Task.FromResult(0);
         }
 
-        private void DeleteSpawnedProps(List<Prop> props)
+        private void SafeDelete(int p)
         {
-            if (props.Count != 0)
-            {
-                foreach (var prop in props)
-                {
-                    prop.MarkAsNoLongerNeeded();
-                    prop.Delete();
-                }
-                props.Clear();
-            }
+            SetEntityAsMissionEntity(p, false, false);
+            SetEntityAsNoLongerNeeded(ref p);
+            DeleteEntity(ref p);
         }
     }
 }

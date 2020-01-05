@@ -19,16 +19,15 @@ namespace Client.Controllers
             } 
         }
 
-        private Vehicle m_selectVehicle;
-        private Camera m_selectVehicleCam;
+        private Vehicle m_selectVehicle = null;
+        private Camera m_selectVehicleCam = null;
 
         internal VehicleController(): base(nameof(VehicleController))
         {
 
         }
 
-        [EventHandler("onClientMapStart")]
-        public void OnClientMapStart()
+        public void MapStart()
         {
             m_setupLobby = true;
         }
@@ -43,7 +42,13 @@ namespace Client.Controllers
 
                 if(m_setupLobby)
                 {
-                    if(m_selectVehicle != null)
+                    if (Game.PlayerPed.LastVehicle != null)
+                        Game.PlayerPed.LastVehicle.Delete();
+
+                    if (Game.PlayerPed.CurrentVehicle != null)
+                        Game.PlayerPed.CurrentVehicle.Delete();
+
+                    if (m_selectVehicle != null)
                     {
                         m_selectVehicle.Delete();
                         m_selectVehicle = null;
@@ -58,9 +63,13 @@ namespace Client.Controllers
                     World.RenderingCamera = m_selectVehicleCam;
 
                     m_selectVehicle = await World.CreateVehicle(new Model(VehicleHash.Adder), m_vehiclePosition);
-                    m_selectVehicle.PlaceOnGround();
-                    m_selectVehicle.IsPositionFrozen = true;
-                    m_selectVehicle.Mods.PrimaryColor = VehicleColor.HotPink;
+
+                    if (m_selectVehicle != null)
+                    {
+                        m_selectVehicle.PlaceOnGround();
+                        m_selectVehicle.IsPositionFrozen = true;
+                        m_selectVehicle.Mods.PrimaryColor = VehicleColor.HotPink;
+                    }
                 }
 
                 if(Game.IsControlJustPressed(0, Control.FrontendSocialClub))
@@ -69,13 +78,14 @@ namespace Client.Controllers
                     m_selectVehicleCam.Delete();
                     m_selectVehicleCam = null;
 
-                    GameController.GameState = GameState.PRE_COUNTDOWN;
+                    Client.Instance.Game.GameStateListener.Invoke(GameState.PRE_COUNTDOWN);
+
                     TriggerEvent("racing:spawn");
                 }
             }
             catch (Exception e)
             {
-                Logger.Exception(e);
+                Logger.Exception(e, "VehicleController");
                 await Delay(5000);
             }
         }

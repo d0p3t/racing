@@ -18,6 +18,7 @@ namespace Client
         public LobbyController Lobby { get; private set; }
         public PropController Props { get; private set; }
         public SpawnController Spawn { get; private set; }
+        public TimerBarController TimerBars { get; private set; }
         public VehicleController Vehicle { get; private set; }
 
         public Client()
@@ -30,6 +31,7 @@ namespace Client
             Lobby = new LobbyController();
             Props = new PropController();
             Spawn = new SpawnController();
+            TimerBars = new TimerBarController();
             Vehicle = new VehicleController();
 
             RegisterScript(Audio);
@@ -39,6 +41,7 @@ namespace Client
             RegisterScript(Lobby);
             RegisterScript(Props);
             RegisterScript(Spawn);
+            RegisterScript(TimerBars);
             RegisterScript(Vehicle);
 
             Instance = this;
